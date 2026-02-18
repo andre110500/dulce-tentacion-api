@@ -81,10 +81,22 @@ exports.product_create = [
 ];
 
 exports.product_list = asyncHandler(async (req, res, next) => {
-  const products = await Product.find().sort({ price: -1 }).exec();
+  const { type } = req.query;
+
+  let filter = {};
+
+  if (type) {
+    filter.type = type;
+  }
+
+  const products = await Product.find(filter)
+    .sort({ price: -1 })
+    .exec();
+
   console.log(`response is ${JSON.stringify(products)}`);
   res.json(products);
 });
+
 
 exports.product_schema = asyncHandler(async (req, res, next) => {
   //
