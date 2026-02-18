@@ -86,16 +86,22 @@ exports.product_list = asyncHandler(async (req, res, next) => {
   let filter = {};
 
   if (type) {
-    filter.type = type;
+    if (Array.isArray(type)) {
+      // Caso ?type=addon&type=sauses
+      filter.type = { $in: type };
+    } else {
+      // Caso ?type=addon
+      filter.type = type;
+    }
   }
 
   const products = await Product.find(filter)
     .sort({ price: -1 })
     .exec();
 
-  console.log(`response is ${JSON.stringify(products)}`);
   res.json(products);
 });
+
 
 
 exports.product_schema = asyncHandler(async (req, res, next) => {
