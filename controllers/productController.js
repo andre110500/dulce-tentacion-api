@@ -1,81 +1,80 @@
 const Product = require("../models/product");
 const asyncHandler = require("express-async-handler");
 const jwt = require("jsonwebtoken");
-const { body, validationResult } = require("express-validator");
 const he = require("he");
 
-// Common validation for product fields
-const validation = [
-  body("name", "name must be specified").trim().isLength({ min: 1 }).escape(),
-  body("apiUrl")
-    .optional()
-    .isString()
-    .trim()
-    .escape()
-    .withMessage("apiUrl must be a string value and at least 1 character long"),
-  body("price", "price must be specified").trim().escape().isNumeric(),
-  body("imgUrl", "imgUrl must be specified")
-    .trim()
-    .isLength({ min: 1 })
-    .escape(),
-  body("outOfStock")
-    .optional()
-    .trim()
-    .escape()
-    .isBoolean()
-    .withMessage("outOfStock must be a boolean value"),
-  body("flavours")
-    .optional()
-    .trim()
-    .escape()
-    .isNumeric()
-    .withMessage("Flavours must be a valid number"),
-  body("description").optional().trim().escape(),
-];
+// Normaliza valores de texto que llegan del body: recorta espacios, decodifica HTML
+// y convierte strings vacios en undefined para que Mongoose aplique la logica del schema.
+const decodeString = (value) => {
+  if (typeof value !== "string") {
+    return value;
+  }
+
+  const trimmedValue = value.trim();
+  return trimmedValue ? he.decode(trimmedValue) : undefined;
+};
+
+// Centraliza que campos del request pueden crear/actualizar un producto.
+// Asi el controller prepara datos limpios, pero las reglas de required, enum y tipos quedan en el modelo.
+const getProductData = (body) => ({
+  name: decodeString(body.name),
+  price: decodeString(body.price),
+  imgUrl: decodeString(body.imgUrl),
+  outOfStock: decodeString(body.outOfStock),
+  description: decodeString(body.description),
+  flavours: decodeString(body.flavours),
+  apiRoute: decodeString(body.apiRoute),
+  type: decodeString(body.type),
+  subType: decodeString(body.subType),
+});
+
+// Convierte errores de Mongoose a un formato simple para que el frontend pueda mostrar
+// que campo fallo, cual fue el mensaje y que valor se recibio.
+const formatMongooseErrors = (error) => {
+  if (error.name === "ValidationError") {
+    return Object.values(error.errors).map((validationError) => ({
+      field: validationError.path,
+      message: validationError.message,
+      value: validationError.value,
+    }));
+  }
+
+  if (error.name === "CastError") {
+    return [
+      {
+        field: error.path,
+        message: error.message,
+        value: error.value,
+      },
+    ];
+  }
+
+  return null;
+};
 
 exports.product_create = [
-  ...validation, // Spread the common validation array
-
   async (req, res, next) => {
-    // Extract the validation errors from a request.
-    const errors = validationResult(req);
+    // El producto se crea con datos normalizados; al guardar, Mongoose valida segun ProductSchema.
+    const product = new Product(getProductData(req.body));
 
-    // Create a BookInstance object with escaped and trimmed data.git
+    try {
+      jwt.verify(req.token, "secretkey");
+      await product.save();
+      res.status(200).json({ product });
+    } catch (err) {
+      console.log(err);
+      const validationErrors = formatMongooseErrors(err);
 
-    const product = new Product({
-      name: he.decode(req.body.name),
-      price: req.body.price,
-      imgUrl: he.decode(req.body.imgUrl),
-      outOfStock: req.body.outOfStock,
-      description: req.body.description,
-      flavours: req.body.flavours,
-      apiRoute: req.body.apiRoute,
-      type: req.body.type,
-    });
-
-    if (!errors.isEmpty()) {
-      // There are errors.
-
-      res.status(422).json({ error: "Body validation failed" });
-      return;
-    } else {
-      try {
-        // Data from form is valid
-        jwt.verify(req.token, "secretkey");
-        await product.save();
-        res.status(200).json({ product });
-      } catch (err) {
-        console.log(err);
-        // Check if it's a validation error from Mongoose
-        if (err.name === "ValidationError") {
-          return res.status(422).json({ error: "Schema validation Failed" });
-        }
-
-        // For other errors, return a generic error message
-        res
-          .status(500)
-          .json({ message: "Something went wrong", error: err.message });
+      if (validationErrors) {
+        return res.status(422).json({
+          error: "Schema validation failed",
+          errors: validationErrors,
+        });
       }
+
+      res
+        .status(500)
+        .json({ message: "Something went wrong", error: err.message });
     }
   },
 ];
@@ -122,42 +121,45 @@ exports.product_schema = asyncHandler(async (req, res, next) => {
 });
 
 exports.product_update = [
-  ...validation, // Spread the common validation array
   async (req, res, next) => {
+    // Reutilizamos la misma preparacion de datos que en create para mantener ambos flujos alineados.
+    const productData = getProductData(req.body);
     const updatedProduct = new Product({
-      name: he.decode(req.body.name),
-      price: req.body.price,
-      imgUrl: he.decode(req.body.imgUrl),
-      description: req.body.description,
-      outOfStock: req.body.outOfStock,
-      flavours: req.body.flavours,
-      apiRoute: req.body.apiRoute,
-      type: req.body.type,
-      _id: req.params.id, // This is required, or a new ID will be assigned!
+      ...productData,
+      _id: req.params.id,
     });
 
     console.log(`updated product ${updatedProduct}  `);
 
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      res.status(422).json({ error: "Validation failed" });
-    } else {
-      try {
-        jwt.verify(req.token, "secretkey");
-        await Product.findByIdAndUpdate(req.params.id, updatedProduct, {});
-        //delte missing flavours field
-        if (!updatedProduct.flavours) {
-          await Product.findByIdAndUpdate(
-            req.params.id,
-            { $unset: { flavours: 1 } },
-            {}
-          );
-        }
-        res.status(200).json({});
-      } catch (error) {
-        console.log("Error occurred bro:", error);
-        res.status(500).json({ error: error });
+    try {
+      jwt.verify(req.token, "secretkey");
+      // Validamos una instancia completa para respetar los required del schema antes de actualizar.
+      await updatedProduct.validate();
+      await Product.findByIdAndUpdate(req.params.id, productData, {
+        // Mongoose tambien valida el update, asi cambios futuros del schema aplican automaticamente.
+        runValidators: true,
+      });
+      //delte missing flavours field
+      if (!updatedProduct.flavours) {
+        await Product.findByIdAndUpdate(
+          req.params.id,
+          { $unset: { flavours: 1 } },
+          {}
+        );
       }
+      res.status(200).json({});
+    } catch (error) {
+      console.log("Error occurred bro:", error);
+      const validationErrors = formatMongooseErrors(error);
+
+      if (validationErrors) {
+        return res.status(422).json({
+          error: "Schema validation failed",
+          errors: validationErrors,
+        });
+      }
+
+      res.status(500).json({ error: error });
     }
   },
 ];
