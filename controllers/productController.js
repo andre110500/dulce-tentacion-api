@@ -117,7 +117,10 @@ exports.product_schema = asyncHandler(async (req, res, next) => {
     });
   console.log(`schema is ${JSON.stringify(schemaDetails)}`);
   //
-  res.json(schemaDetails);
+  res.json({
+    fields: schemaDetails,
+    subTypesByType: Product.SUB_TYPES_BY_TYPE,
+  });
 });
 
 exports.product_update = [
