@@ -5,6 +5,18 @@ const Schema = mongoose.Schema;
 const SUB_TYPES_BY_TYPE = {
   drink: ["can", "small-bottle", "wine", "fernet", "liqueur", "soft-drink"],
   "frozen-treat": ["tub", "popsicle", "dessert", "cone"],
+  "add-on": ["pot-topping", "wafer-cone"],
+};
+
+const getProductTypeFromValidatorContext = (context) => {
+  const update = context.getUpdate?.();
+
+  return (
+    context.type ||
+    context.get?.("type") ||
+    update?.type ||
+    update?.$set?.type
+  );
 };
 
 const ProductSchema = new Schema({
@@ -25,7 +37,7 @@ const ProductSchema = new Schema({
     required: false,
     validate: {
       validator: function (value) {
-        const productType = this.type || this.get?.("type");
+        const productType = getProductTypeFromValidatorContext(this);
         const allowedSubTypes = SUB_TYPES_BY_TYPE[productType];
 
         if (!value) {

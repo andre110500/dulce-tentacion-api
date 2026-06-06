@@ -6,7 +6,8 @@
     "start": " node ./bin/www",
     "devstart": " nodemon ./bin/www",
     "seed:drinks": "node ./scripts/seedDrinks.js",
-    "seed:cigarettes": "node ./scripts/seedCigarettes.js"
+    "seed:cigarettes": "node ./scripts/seedCigarettes.js",
+    "seed:add-on-subtypes": "node ./scripts/seedAddOnSubTypes.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
